@@ -41,7 +41,7 @@
     <h2>Polygon ERC-20 Token Seller</h2>
 
     <div>
-      <button onclick="connectWallet()">Connect MetaMask</button>
+      <button id="connectBtn" onclick="connectWallet()">Connect MetaMask</button>
       <p id="walletAddress">Wallet: Not connected</p>
       <p id="usdcBalance">USDC: --</p>
     </div>
@@ -63,7 +63,7 @@
         <option value="0xA102072A4C07F06EC3B4900FDC4C7B80b6c57429">Dfyn</option>
         <option value="0x578375c3af7D61586c2C3A7BA87d2eEd640EFA40">JetSwap</option>
         <option value="0xBA12222222228d8Ba445958a75a0704d566BF2C8">Balancer V2</option>
-        <option value="0xa98ae4A6610849fE61A45Ab2f3DcbC2c98696e82">WaultSwap</option>
+        <option value="0xA98AE4a6610849fE61A45Ab2f3DcbC2c98696e82">WaultSwap</option>
         <option value="0xC0788A3aD43d79aa53B09c2EaCc313A787d1d607">ApeSwap</option>
         <option value="0x8e0c0edB9c22008e7F3fC4b29A2CD78d5fC7E8a9">Firebird Aggregator</option>
       </select>
@@ -76,7 +76,7 @@
   <script>
     let provider, signer, userAddress;
     let tokenContract, tokenSymbol, tokenDecimals;
-    const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+    const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // USDC on Polygon
     const ERC20_ABI = [
       "function symbol() view returns (string)",
       "function balanceOf(address) view returns (uint)",
@@ -87,7 +87,7 @@
 
     async function connectWallet() {
       if (!window.ethereum) {
-        alert("MetaMask not found.");
+        alert("MetaMask not found. Please install MetaMask extension.");
         return;
       }
 
@@ -99,11 +99,15 @@
         document.getElementById("walletAddress").innerText = "Wallet: " + userAddress;
         await getUSDCBalance();
 
-        // Optional: Listen for account changes
+        // Remove existing listeners to prevent duplicates
+        window.ethereum.removeAllListeners('accountsChanged');
+
+        // Listen for account changes
         window.ethereum.on('accountsChanged', async (accounts) => {
           if (accounts.length === 0) {
             document.getElementById("walletAddress").innerText = "Wallet: Not connected";
             document.getElementById("usdcBalance").innerText = "USDC: --";
+            userAddress = null;
           } else {
             userAddress = accounts[0];
             document.getElementById("walletAddress").innerText = "Wallet: " + userAddress;
@@ -149,7 +153,7 @@
     }
 
     async function sellMax() {
-      if (!tokenContract || !userAddress) return;
+      if (!tokenContract || !userAddress || typeof tokenDecimals === 'undefined') return;
       const balance = await tokenContract.balanceOf(userAddress);
       document.getElementById("sellAmount").value = ethers.utils.formatUnits(balance, tokenDecimals);
     }
@@ -160,17 +164,17 @@
         return;
       }
 
-      const amount = document.getElementById("sellAmount").value;
+      const amountStr = document.getElementById("sellAmount").value.trim();
       const routerAddr = document.getElementById("routerSelect").value;
-      const tokenAddr = document.getElementById("tokenAddress").value;
+      const tokenAddr = document.getElementById("tokenAddress").value.trim();
 
-      if (!amount || !tokenAddr || !routerAddr) {
+      if (!amountStr || !tokenAddr || !routerAddr) {
         alert("Enter all required fields.");
         return;
       }
 
       try {
-        const amountIn = ethers.utils.parseUnits(amount, tokenDecimals);
+        const amountIn = ethers.utils.parseUnits(amountStr, tokenDecimals);
         const allowance = await tokenContract.allowance(userAddress, routerAddr);
         if (allowance.lt(amountIn)) {
           document.getElementById("status").innerText = "Approving token...";
@@ -187,7 +191,7 @@
           0,
           [tokenAddr, USDC_ADDRESS],
           userAddress,
-          Math.floor(Date.now() / 1000) + 60
+          Math.floor(Date.now() / 1000) + 60 // deadline
         );
         await tx.wait();
 
