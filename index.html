@@ -6,7 +6,7 @@
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
   <style>
     body {
-      background-color: #013220; /* Dark Green */
+      background-color: #013220;
       color: #fff;
       font-family: Arial, sans-serif;
       padding: 20px;
@@ -23,15 +23,12 @@
       color: white;
     }
     .container {
-      max-width: 650px;
+      max-width: 700px;
       margin: auto;
       background: #025f30;
       padding: 20px;
       border-radius: 10px;
       box-shadow: 0 0 10px #000;
-    }
-    .section {
-      margin-bottom: 20px;
     }
     h2 {
       text-align: center;
@@ -43,20 +40,20 @@
   <div class="container">
     <h2>Polygon ERC-20 Token Seller</h2>
 
-    <div class="section">
+    <div>
       <button onclick="connectWallet()">Connect MetaMask</button>
       <p id="walletAddress">Wallet: Not connected</p>
-      <p id="usdcBalance">USDC: 0</p>
+      <p id="usdcBalance">USDC: --</p>
     </div>
 
-    <div class="section">
+    <div>
       <input id="tokenAddress" placeholder="Enter ERC-20 Token Address" size="42" />
       <button onclick="loadToken()">Load Token</button>
-      <p id="tokenSymbol">Symbol: </p>
-      <p id="tokenBalance">Token Balance: </p>
+      <p id="tokenSymbol">Symbol: --</p>
+      <p id="tokenBalance">Token Balance: --</p>
     </div>
 
-    <div class="section">
+    <div>
       <input id="sellAmount" placeholder="Amount to Sell" />
       <button onclick="sellMax()">Sell Max</button>
       <select id="routerSelect">
@@ -78,8 +75,8 @@
 
   <script>
     let provider, signer, userAddress;
-    let tokenContract, tokenSymbol;
-    const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // Polygon USDC
+    let tokenContract, tokenSymbol, tokenDecimals;
+    const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
     const ERC20_ABI = [
       "function symbol() view returns (string)",
       "function balanceOf(address) view returns (uint)",
@@ -89,59 +86,102 @@
     ];
 
     async function connectWallet() {
-      provider = new ethers.providers.Web3Provider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      signer = provider.getSigner();
-      userAddress = await signer.getAddress();
-      document.getElementById("walletAddress").innerText = "Wallet: " + userAddress;
-      getUSDCBalance();
+      if (!window.ethereum) {
+        alert("MetaMask not found.");
+        return;
+      }
+
+      try {
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        userAddress = await signer.getAddress();
+        document.getElementById("walletAddress").innerText = "Wallet: " + userAddress;
+        await getUSDCBalance();
+
+        // Optional: Listen for account changes
+        window.ethereum.on('accountsChanged', async (accounts) => {
+          if (accounts.length === 0) {
+            document.getElementById("walletAddress").innerText = "Wallet: Not connected";
+            document.getElementById("usdcBalance").innerText = "USDC: --";
+          } else {
+            userAddress = accounts[0];
+            document.getElementById("walletAddress").innerText = "Wallet: " + userAddress;
+            await getUSDCBalance();
+          }
+        });
+      } catch (err) {
+        alert("Failed to connect wallet: " + err.message);
+      }
     }
 
     async function getUSDCBalance() {
+      if (!userAddress) return;
       const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
-      const bal = await usdc.balanceOf(userAddress);
       const decimals = await usdc.decimals();
+      const bal = await usdc.balanceOf(userAddress);
       document.getElementById("usdcBalance").innerText = `USDC: ${ethers.utils.formatUnits(bal, decimals)}`;
     }
 
     async function loadToken() {
-      const address = document.getElementById("tokenAddress").value;
-      tokenContract = new ethers.Contract(address, ERC20_ABI, signer);
-      tokenSymbol = await tokenContract.symbol();
-      const decimals = await tokenContract.decimals();
-      const balance = await tokenContract.balanceOf(userAddress);
-      document.getElementById("tokenSymbol").innerText = "Symbol: " + tokenSymbol;
-      document.getElementById("tokenBalance").innerText = "Token Balance: " + ethers.utils.formatUnits(balance, decimals);
+      if (!signer) {
+        alert("Please connect your wallet first.");
+        return;
+      }
+
+      const address = document.getElementById("tokenAddress").value.trim();
+      if (!ethers.utils.isAddress(address)) {
+        alert("Invalid token address.");
+        return;
+      }
+
+      try {
+        tokenContract = new ethers.Contract(address, ERC20_ABI, signer);
+        tokenSymbol = await tokenContract.symbol();
+        tokenDecimals = await tokenContract.decimals();
+        const balance = await tokenContract.balanceOf(userAddress);
+
+        document.getElementById("tokenSymbol").innerText = "Symbol: " + tokenSymbol;
+        document.getElementById("tokenBalance").innerText = "Token Balance: " + ethers.utils.formatUnits(balance, tokenDecimals);
+      } catch (err) {
+        alert("Error loading token: " + err.message);
+      }
     }
 
     async function sellMax() {
-      if (!tokenContract) return alert("Load token first");
+      if (!tokenContract || !userAddress) return;
       const balance = await tokenContract.balanceOf(userAddress);
-      const decimals = await tokenContract.decimals();
-      document.getElementById("sellAmount").value = ethers.utils.formatUnits(balance, decimals);
+      document.getElementById("sellAmount").value = ethers.utils.formatUnits(balance, tokenDecimals);
     }
 
     async function sellToken() {
+      if (!tokenContract || !signer) {
+        alert("Connect wallet and load token first.");
+        return;
+      }
+
       const amount = document.getElementById("sellAmount").value;
       const routerAddr = document.getElementById("routerSelect").value;
       const tokenAddr = document.getElementById("tokenAddress").value;
 
-      if (!amount || !tokenAddr) return alert("Enter token and amount");
-
-      const decimals = await tokenContract.decimals();
-      const amountIn = ethers.utils.parseUnits(amount, decimals);
-
-      const allowance = await tokenContract.allowance(userAddress, routerAddr);
-      if (allowance.lt(amountIn)) {
-        const tx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256);
-        document.getElementById("status").innerText = "Approving...";
-        await tx.wait();
+      if (!amount || !tokenAddr || !routerAddr) {
+        alert("Enter all required fields.");
+        return;
       }
 
-      const routerAbi = ["function swapExactTokensForTokens(uint amountIn,uint amountOutMin,address[] calldata path,address to,uint deadline) external returns (uint[] memory)"];
-      const router = new ethers.Contract(routerAddr, routerAbi, signer);
-
       try {
+        const amountIn = ethers.utils.parseUnits(amount, tokenDecimals);
+        const allowance = await tokenContract.allowance(userAddress, routerAddr);
+        if (allowance.lt(amountIn)) {
+          document.getElementById("status").innerText = "Approving token...";
+          const approveTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256);
+          await approveTx.wait();
+        }
+
+        const routerAbi = ["function swapExactTokensForTokens(uint amountIn,uint amountOutMin,address[] calldata path,address to,uint deadline) external returns (uint[] memory)"];
+        const router = new ethers.Contract(routerAddr, routerAbi, signer);
+
+        document.getElementById("status").innerText = "Swapping tokens...";
         const tx = await router.swapExactTokensForTokens(
           amountIn,
           0,
@@ -149,11 +189,11 @@
           userAddress,
           Math.floor(Date.now() / 1000) + 60
         );
-        document.getElementById("status").innerText = "Selling...";
         await tx.wait();
-        document.getElementById("status").innerText = "Sell complete!";
-        getUSDCBalance();
-        loadToken();
+
+        document.getElementById("status").innerText = "Swap completed!";
+        await getUSDCBalance();
+        await loadToken();
       } catch (err) {
         document.getElementById("status").innerText = "Swap failed: " + err.message;
       }
